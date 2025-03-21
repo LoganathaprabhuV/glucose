@@ -1,0 +1,77 @@
+#include "UbidotsESPMQTT.h"
+#include "HX711.h"
+HX711 scale;
+int relay = D0; // Relay pin
+int buzzer = D7; // Buzzer pin
+char* TOKEN = "BBUS-ICK0tP9n0RVQlqdHfn75jjtFlqXh7B"; 
+char* WIFISSID = "Redmi 12"; 
+char* PASSWORD = "pqhjuj44j7"; 
+char* DEVICE1 = "Relay status"; 
+char* DEVICE2 = "Fluid level"; 
+float load_set = 1;
+float v = 1.428;
+Ubidots client(TOKEN);
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i=0;i<length;i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+}
+
+void setup() {
+  Serial.begin(9600); // Initialize Serial Monitor at 9600 baud rate
+  Serial.println("Setup Started");
+
+  scale.begin(D2, D1); // Initialize HX711 with the given pins
+  Serial.println("HX711 Initialized");
+
+  client.wifiConnection(WIFISSID, PASSWORD);
+  client.setDebug(true);
+  client.begin(callback);
+  
+  scale.set_scale(-594.f); // Set scale calibration factor
+  scale.tare(); // Reset the scale to 0
+  pinMode(relay, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  
+  digitalWrite(relay, HIGH);  // Set relay to HIGH initially
+  digitalWrite(buzzer, LOW);  // Turn off buzzer initially
+  
+  Serial.println("Setup Complete");
+}
+
+void loop() {
+ float y = scale.get_units(10);  // Read the weight from the scale
+ float old = (y * load_set * v) - 1;
+
+  Serial.print("Weight: ");
+  Serial.println(y);
+  Serial.print("Calculated Fluid Level (old): ");
+  Serial.println(old);
+
+  if(y < 480) { // Low fluid level
+    digitalWrite(buzzer, HIGH);
+    client.add(DEVICE2, old);
+    client.add(DEVICE1, 0);  // Relay OFF
+    digitalWrite(relay, HIGH); // Turn relay OFF
+    delay(2000); 
+  } else if(y > 480) { // High fluid level
+    digitalWrite(buzzer, LOW);
+    client.add(DEVICE2, old);
+    client.add(DEVICE1, 1);  // Relay ON
+    digitalWrite(relay, LOW); // Turn relay ON
+    delay(2000);
+  }
+
+  if(!client.connected()) {
+    Serial.println("Client not connected, reconnecting...");
+    client.reconnect();
+  }
+
+  client.ubidotsPublish("Glucose_level");
+  client.loop();  // Keep MQTT connection alive
+}
